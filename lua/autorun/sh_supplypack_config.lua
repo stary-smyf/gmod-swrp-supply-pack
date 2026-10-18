@@ -3,6 +3,7 @@
 if SERVER then
     AddCSLuaFile()
     AddCSLuaFile("supplypack/cl_medical_symbol.lua")
+    resource.AddFile("materials/entities/weapon_supplypack.png")
 end
 
 SupplyPack = SupplyPack or {}

@@ -1,0 +1,26 @@
+[h1]Star Wars Supply Pack[/h1]
+A throwable medical supply crate for Sandbox and roleplay servers. Drop it to replenish nearby players' health, armor, and ammunition.
+
+[h2]Controls[/h2]
+[list]
+[*]Find Supply Crate under Weapons in the spawnmenu.
+[*]Left mouse button: throw the crate.
+[*]E: retrieve your own crate. Other players cannot retrieve it.
+[/list]
+
+[h2]Features[/h2]
+[list]
+[*]Restores 5 health and 5 armor every second within a 3-meter radius.
+[*]Replenishes ammunition every 5 seconds, up to 1000 reserve rounds per type.
+[*]Rockets, grenades, SMG grenades, and AR2 alternate ammo are capped at 3.
+[*]30-second throw cooldown with a HUD bar and ready sound.
+[*]Retrieving a crate during cooldown applies a 5-second pickup cooldown. No new cooldown starts if it is already ready.
+[*]Only one deployed crate per player. Crates expire after 10 minutes and disappear when their owner disconnects.
+[*]Gray crate models with a white medical insignia, a range indicator, and pickup/resupply sounds.
+[/list]
+
+[h2]Required content and credits[/h2]
+[url=https://steamcommunity.com/sharedfiles/filedetails/?id=2813179606]Colourable Sci-fi Crates by reikonovich[/url] provides the crate model and materials. Subscribe to the required item to avoid missing models/textures. Original model source and additional credits are listed on that item's Workshop page.
+
+[h2]Server configuration[/h2]
+Settings are in lua/autorun/sh_supplypack_config.lua. Resupply affects all living players within range, regardless of team or walls. Custom ammo names can be added to AmmoReserveCaps.

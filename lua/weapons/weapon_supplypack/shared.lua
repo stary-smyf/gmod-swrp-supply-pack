@@ -7,6 +7,7 @@ SWEP.PrintName = "Supply Crate"
 SWEP.Author = "StarySmyf"
 SWEP.Instructions = "LMB - throw crate, E - Pick up crate"
 SWEP.Category = "Supply Crate"
+SWEP.IconOverride = "entities/weapon_supplypack.png"
 SWEP.Spawnable = true
 SWEP.AdminOnly = false
 
