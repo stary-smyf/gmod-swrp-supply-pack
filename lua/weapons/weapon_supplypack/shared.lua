@@ -2,18 +2,20 @@ if SERVER then
     AddCSLuaFile()
 end
 
-SWEP.PrintName = "Paczka zaopatrzeniowa"
+SWEP.PrintName = "Zaopatrzenie"
 SWEP.Author = "Stary"
-SWEP.Instructions = "LPM - rzuc paczke pod nogi. Uzupelnia HP, pancerz i amunicje w promieniu 5 m."
+SWEP.Instructions = "LPM - rzuc paczke. E - podnies wlasna paczke; kolejny rzut po 3 sekundach."
 SWEP.Category = "Zaopatrzenie"
 SWEP.Spawnable = true
 SWEP.AdminOnly = false
 
 SWEP.Base = "weapon_base"
-SWEP.HoldType = "grenade"
-SWEP.UseHands = true
-SWEP.ViewModel = "models/weapons/c_grenade.mdl"
-SWEP.WorldModel = "models/weapons/w_grenade.mdl"
+SWEP.HoldType = "shotgun"
+SWEP.UseHands = false
+SWEP.ViewModel = "models/custom/scifiboxes/crate_d.mdl"
+SWEP.ViewModelScale = 0.8
+SWEP.WorldModel = "models/custom/scifiboxes/crate_d.mdl"
+SWEP.WorldModelScale = 0.4
 SWEP.ViewModelFOV = 62
 SWEP.DrawAmmo = false
 SWEP.DrawCrosshair = false
@@ -32,7 +34,143 @@ SWEP.Secondary.Automatic = false
 SWEP.Secondary.Ammo = "none"
 
 function SWEP:Initialize()
-    self:SetHoldType("grenade")
+    self:SetHoldType(self.HoldType)
+    self:SetColor(SupplyPack.Config.BoxColor)
+end
+
+function SWEP:Deploy()
+    self:SetHoldType(self.HoldType)
+    return true
+end
+
+if CLIENT then
+    local HUD_BACKGROUND = Color(18, 20, 24, 220)
+    local HUD_TRACK = Color(55, 58, 65, 230)
+    local HUD_COOLDOWN = Color(220, 65, 65)
+    local HUD_READY = Color(85, 200, 120)
+    local HUD_TEXT = Color(245, 245, 245)
+
+    function SWEP:DrawHUD()
+        local owner = self:GetOwner()
+        if not IsValid(owner) or owner ~= LocalPlayer() or not owner:Alive() then return end
+
+        local nextThrow = owner:GetNWFloat("SupplyPackNextThrow", 0)
+        local duration = owner:GetNWFloat("SupplyPackCooldownDuration", SupplyPack.Config.ThrowCooldown)
+        -- Include predicted throws before the server's cooldown reaches the client.
+        if self:GetNextPrimaryFire() > nextThrow then
+            nextThrow = self:GetNextPrimaryFire()
+            duration = SupplyPack.Config.ThrowCooldown
+        end
+        local remaining = math.max(0, nextThrow - CurTime())
+        local progress = 1 - math.Clamp(remaining / math.max(duration, 0.001), 0, 1)
+        local width, height = math.min(320, ScrW() - 32), 48
+        local x, y = (ScrW() - width) * 0.5, ScrH() - height - 32
+        local label = remaining > 0
+            and string.format("Zaopatrzenie - %.1f s", remaining)
+            or "Zaopatrzenie - gotowe"
+
+        draw.RoundedBox(6, x, y, width, height, HUD_BACKGROUND)
+        draw.SimpleText(label, "DermaDefaultBold", x + width * 0.5, y + 8,
+            HUD_TEXT, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+        draw.RoundedBox(3, x + 10, y + 30, width - 20, 8, HUD_TRACK)
+        if progress > 0 then
+            draw.RoundedBox(3, x + 10, y + 30, (width - 20) * progress, 8,
+                remaining > 0 and HUD_COOLDOWN or HUD_READY)
+        end
+    end
+
+    function SWEP:GetCrateWorldModelTransform()
+        local owner = self:GetOwner()
+        if not IsValid(owner) then return self:GetPos(), self:GetAngles() end
+
+        local ang = owner:EyeAngles()
+        local modelAng = Angle(ang.p, ang.y, ang.r)
+        modelAng:RotateAroundAxis(ang:Up(), 90)
+
+        local rightBone = owner:LookupBone("ValveBiped.Bip01_R_Hand")
+        local leftBone = owner:LookupBone("ValveBiped.Bip01_L_Hand")
+        local rightHand = rightBone and owner:GetBoneMatrix(rightBone)
+        local leftHand = leftBone and owner:GetBoneMatrix(leftBone)
+        local grip = owner:GetPos() + owner:GetUp() * 50 + ang:Forward() * 20
+        if rightHand then
+            grip = rightHand:GetTranslation()
+            if leftHand then
+                grip = (grip + leftHand:GetTranslation()) * 0.5
+            end
+        end
+
+        -- The crate origin is at its base; rest the bottom on the player's hands.
+        return grip + modelAng:Up() * 2, modelAng
+    end
+
+    function SWEP:DrawWorldModel(flags)
+        local owner = self:GetOwner()
+        if IsValid(owner) and CurTime() < math.max(self:GetNextPrimaryFire(),
+            owner:GetNWFloat("SupplyPackNextThrow", 0)) then return end
+
+        if not IsValid(self.SupplyPackWorldModel) then
+            self.SupplyPackWorldModel = ClientsideModel(self.WorldModel)
+            if not IsValid(self.SupplyPackWorldModel) then return end
+            self.SupplyPackWorldModel:SetNoDraw(true)
+        end
+
+        local model = self.SupplyPackWorldModel
+        model:SetColor(SupplyPack.Config.BoxColor)
+        model:SetModelScale(self.WorldModelScale, 0)
+        local pos, ang = self:GetCrateWorldModelTransform()
+        model:SetPos(pos)
+        model:SetAngles(ang)
+        model:SetupBones()
+        model:DrawModel(flags)
+    end
+
+    function SWEP:OnRemove()
+        if IsValid(self.SupplyPackWorldModel) then
+            self.SupplyPackWorldModel:Remove()
+        end
+        self.SupplyPackWorldModel = nil
+    end
+
+    function SWEP:GetViewModelPosition(pos, ang)
+        local modelPos = pos + ang:Forward() * 60 + ang:Right() * 10 - ang:Up() * 48
+        local modelAng = Angle(ang.p, ang.y, ang.r)
+        modelAng:RotateAroundAxis(ang:Up(), 90)
+        return modelPos, modelAng
+    end
+
+    function SWEP:PreDrawViewModel(vm)
+        local owner = self:GetOwner()
+        local nextThrow = IsValid(owner) and owner:GetNWFloat("SupplyPackNextThrow", 0) or 0
+        -- Predicted fire time hides it immediately; player state survives weapon switches.
+        if CurTime() < math.max(self:GetNextPrimaryFire(), nextThrow) then
+            return true
+        end
+
+        self.SupplyPackPreviousViewModelScale = vm:GetModelScale()
+        self.SupplyPackPreviousViewModelColor = vm:GetColor()
+        vm:SetModelScale(self.ViewModelScale, 0)
+        vm:SetColor(SupplyPack.Config.BoxColor)
+        -- Apply the tint directly to the first-person render pass.
+        self.SupplyPackPreviousColorModulation = {render.GetColorModulation()}
+        local color = SupplyPack.Config.BoxColor
+        render.SetColorModulation(color.r / 255, color.g / 255, color.b / 255)
+    end
+
+    function SWEP:PostDrawViewModel()
+        local previous = self.SupplyPackPreviousColorModulation
+        if previous then
+            render.SetColorModulation(previous[1], previous[2], previous[3])
+            self.SupplyPackPreviousColorModulation = nil
+        end
+    end
+
+    function SWEP:ViewModelDrawn(vm)
+        -- The player shares this viewmodel entity with other weapons.
+        vm:SetModelScale(self.SupplyPackPreviousViewModelScale or 1, 0)
+        vm:SetColor(self.SupplyPackPreviousViewModelColor or Color(255, 255, 255))
+        self.SupplyPackPreviousViewModelScale = nil
+        self.SupplyPackPreviousViewModelColor = nil
+    end
 end
 
 function SWEP:PrimaryAttack()
@@ -61,26 +199,43 @@ function SWEP:PrimaryAttack()
     local forward = Angle(0, eyeAng.y, 0):Forward()
     local startPos = owner:GetPos() + Vector(0, 0, 40)
 
-    -- Nie spawnuj paczki w scianie znajdujacej sie przed graczem.
+    local pack = ents.Create("ent_supplypack")
+    if not IsValid(pack) then
+        self:SetNextPrimaryFire(now)
+        self:SetNextSecondaryFire(now)
+        return
+    end
+
+    pack:SetPos(startPos)
+    pack:SetAngles(Angle(0, eyeAng.y + 90, 0))
+    -- Engine ownership disables collisions with the thrower.
+    pack.SupplyPackOwner = owner
+    pack:SetCreator(owner)
+    pack:Spawn()
+    pack:Activate()
+
+    -- Check the actual crate hull instead of the old ammo-box dimensions.
+    local mins, maxs = pack:WorldSpaceAABB()
+    mins = mins - pack:GetPos()
+    maxs = maxs - pack:GetPos()
     local tr = util.TraceHull({
         start = startPos,
         endpos = startPos + forward * 45,
-        mins = Vector(-8, -8, -8),
-        maxs = Vector(8, 8, 8),
-        filter = owner,
+        mins = mins,
+        maxs = maxs,
+        filter = {owner, pack},
         mask = MASK_SOLID
     })
-
-    local pack = ents.Create("ent_supplypack")
-    if not IsValid(pack) then return end
-
+    if tr.StartSolid or tr.AllSolid then
+        pack:Remove()
+        self:SetNextPrimaryFire(now)
+        self:SetNextSecondaryFire(now)
+        return
+    end
+    pack:SetPos(tr.HitPos + tr.HitNormal)
     owner.SupplyPackNextThrow = now + cfg.ThrowCooldown
-
-    pack:SetPos(tr.HitPos)
-    pack:SetAngles(Angle(0, eyeAng.y, 0))
-    pack:SetOwner(owner)
-    pack:Spawn()
-    pack:Activate()
+    owner:SetNWFloat("SupplyPackCooldownDuration", cfg.ThrowCooldown)
+    owner:SetNWFloat("SupplyPackNextThrow", owner.SupplyPackNextThrow)
 
     -- Jedna aktywna paczka na gracza (zabezpieczenie przed spamem).
     if IsValid(owner.SupplyPackActive) then
@@ -91,7 +246,6 @@ function SWEP:PrimaryAttack()
     local phys = pack:GetPhysicsObject()
     if IsValid(phys) then
         phys:SetVelocity(forward * 165 + Vector(0, 0, 95) + owner:GetVelocity() * 0.2)
-        phys:AddAngleVelocity(Vector(0, 100, 30))
     end
 end
 

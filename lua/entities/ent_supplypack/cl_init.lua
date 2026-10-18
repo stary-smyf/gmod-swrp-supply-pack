@@ -3,6 +3,14 @@ include("shared.lua")
 local RING_COLOR = Color(230, 226, 12, 180)
 local SEGMENTS = 48
 
+function ENT:Initialize()
+    self:EnableCustomCollisions()
+end
+
+function ENT:OnRemove()
+    self:ClearTraceShape()
+end
+
 function ENT:Draw()
     self:DrawModel()
 
