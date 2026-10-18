@@ -1,6 +1,16 @@
 AddCSLuaFile("cl_init.lua")
 AddCSLuaFile("shared.lua")
+AddCSLuaFile("supplypack/cl_medical_symbol.lua")
 include("shared.lua")
+
+hook.Add("PlayerDisconnected", "SupplyPack.RemoveDisconnectedPlayerCrates", function(ply)
+    for _, crate in ipairs(ents.FindByClass("ent_supplypack")) do
+        if crate.SupplyPackOwner == ply then
+            crate:Remove()
+        end
+    end
+    ply.SupplyPackActive = nil
+end)
 
 local MODEL = "models/custom/scifiboxes/crate_d.mdl"
 local MODEL_SCALE = 0.7
@@ -93,19 +103,25 @@ function ENT:Use(activator)
         or activator ~= self.SupplyPackOwner then return end
 
     self.PickedUp = true
-    local nextThrow = CurTime() + SupplyPack.Config.PickupCooldown
-    activator.SupplyPackNextThrow = nextThrow
-    activator:SetNWFloat("SupplyPackCooldownDuration", SupplyPack.Config.PickupCooldown)
-    activator:SetNWFloat("SupplyPackNextThrow", nextThrow)
+    local now = CurTime()
+    -- Picking up a ready crate must not start another cooldown.
+    if now < (activator.SupplyPackNextThrow or 0) then
+        local nextThrow = now + SupplyPack.Config.PickupCooldown
+        activator.SupplyPackNextThrow = nextThrow
+        activator:SetNWFloat("SupplyPackCooldownDuration", SupplyPack.Config.PickupCooldown)
+        activator:SetNWFloat("SupplyPackNextThrow", nextThrow)
 
-    -- Replace the old weapon cooldown as well as the player-wide cooldown.
-    for _, weapon in ipairs(activator:GetWeapons()) do
-        if weapon:GetClass() == "weapon_supplypack" then
-            weapon:SetNextPrimaryFire(nextThrow)
-            weapon:SetNextSecondaryFire(nextThrow)
+        -- Replace the old weapon cooldown as well as the player-wide cooldown.
+        for _, weapon in ipairs(activator:GetWeapons()) do
+            if weapon:GetClass() == "weapon_supplypack" then
+                weapon:SetNextPrimaryFire(nextThrow)
+                weapon:SetNextSecondaryFire(nextThrow)
+            end
         end
     end
 
+    -- Emit from the player so removing the crate does not cut off the sound.
+    activator:EmitSound(SupplyPack.Config.PickupSound or "items/ammo_pickup.wav", 65, 100, 0.65)
     self:Remove()
 end
 
@@ -197,6 +213,7 @@ function ENT:Think()
 
     local cfg = SupplyPack.Config
     self.NextAmmoPulseAt = self.NextAmmoPulseAt or (now + cfg.AmmoPulseInterval)
+    self:SetColor(cfg.BoxColor)
     local healthArmorDue = now >= self.NextPulseAt
     local ammoDue = now >= self.NextAmmoPulseAt
     if healthArmorDue or ammoDue then

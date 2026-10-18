@@ -1,11 +1,12 @@
 if SERVER then
     AddCSLuaFile()
+    AddCSLuaFile("supplypack/cl_medical_symbol.lua")
 end
 
-SWEP.PrintName = "Zaopatrzenie"
-SWEP.Author = "Stary"
-SWEP.Instructions = "LPM - rzuc paczke. E - podnies wlasna paczke; kolejny rzut po 3 sekundach."
-SWEP.Category = "Zaopatrzenie"
+SWEP.PrintName = "Supply Crate"
+SWEP.Author = "StarySmyf"
+SWEP.Instructions = "LMB - throw crate, E - Pick up crate"
+SWEP.Category = "Supply Crate"
 SWEP.Spawnable = true
 SWEP.AdminOnly = false
 
@@ -33,22 +34,67 @@ SWEP.Secondary.DefaultClip = -1
 SWEP.Secondary.Automatic = false
 SWEP.Secondary.Ammo = "none"
 
+function SWEP:UpdateSupplyPackHoldType()
+    local owner = self:GetOwner()
+    local nextThrow = self:GetNextPrimaryFire()
+    if IsValid(owner) then
+        nextThrow = math.max(nextThrow, owner:GetNWFloat("SupplyPackNextThrow", 0))
+        if SERVER then
+            nextThrow = math.max(nextThrow, owner.SupplyPackNextThrow or 0)
+        end
+    end
+
+    local holdType = CurTime() < nextThrow and "normal" or self.HoldType
+    if self:GetHoldType() ~= holdType then
+        self:SetHoldType(holdType)
+    end
+end
+
 function SWEP:Initialize()
-    self:SetHoldType(self.HoldType)
+    self:UpdateSupplyPackHoldType()
     self:SetColor(SupplyPack.Config.BoxColor)
 end
 
 function SWEP:Deploy()
-    self:SetHoldType(self.HoldType)
+    self:UpdateSupplyPackHoldType()
     return true
 end
 
+function SWEP:Think()
+    self:UpdateSupplyPackHoldType()
+    -- Refresh weapons that were already spawned before the color changed.
+    self:SetColor(SupplyPack.Config.BoxColor)
+end
+
 if CLIENT then
-    local HUD_BACKGROUND = Color(18, 20, 24, 220)
+    -- Refresh the renderer along with the SWEP instead of retaining an older helper.
+    include("supplypack/cl_medical_symbol.lua")
+
+    -- Follow the player's confirmed cooldown even while another weapon is selected.
+    local wasCoolingDown = false
+    hook.Add("Think", "SupplyPack.CooldownReadySound", function()
+        local ply = LocalPlayer()
+        if not IsValid(ply) or not ply:Alive() or not ply:HasWeapon("weapon_supplypack") then
+            wasCoolingDown = false
+            return
+        end
+
+        local nextThrow = ply:GetNWFloat("SupplyPackNextThrow", 0)
+        if nextThrow > CurTime() then
+            wasCoolingDown = true
+        elseif wasCoolingDown then
+            wasCoolingDown = false
+            if nextThrow > 0 then
+                surface.PlaySound(SupplyPack.Config.CooldownReadySound or "buttons/button14.wav")
+            end
+        end
+    end)
+
     local HUD_TRACK = Color(55, 58, 65, 230)
-    local HUD_COOLDOWN = Color(220, 65, 65)
+    local HUD_COOLDOWN = Color(158, 155, 155)
     local HUD_READY = Color(85, 200, 120)
-    local HUD_TEXT = Color(245, 245, 245)
+    local WORLD_MODEL_BASE_COLOR = Color(255, 255, 255)
+
 
     function SWEP:DrawHUD()
         local owner = self:GetOwner()
@@ -65,16 +111,10 @@ if CLIENT then
         local progress = 1 - math.Clamp(remaining / math.max(duration, 0.001), 0, 1)
         local width, height = math.min(320, ScrW() - 32), 48
         local x, y = (ScrW() - width) * 0.5, ScrH() - height - 32
-        local label = remaining > 0
-            and string.format("Zaopatrzenie - %.1f s", remaining)
-            or "Zaopatrzenie - gotowe"
 
-        draw.RoundedBox(6, x, y, width, height, HUD_BACKGROUND)
-        draw.SimpleText(label, "DermaDefaultBold", x + width * 0.5, y + 8,
-            HUD_TEXT, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-        draw.RoundedBox(3, x + 10, y + 30, width - 20, 8, HUD_TRACK)
+        draw.RoundedBox(3, x + 10, y - 500, width - 20, 8, HUD_TRACK)
         if progress > 0 then
-            draw.RoundedBox(3, x + 10, y + 30, (width - 20) * progress, 8,
+            draw.RoundedBox(3, x + 10, y - 500, (width - 20) * progress, 8,
                 remaining > 0 and HUD_COOLDOWN or HUD_READY)
         end
     end
@@ -115,13 +155,20 @@ if CLIENT then
         end
 
         local model = self.SupplyPackWorldModel
-        model:SetColor(SupplyPack.Config.BoxColor)
+        -- Apply the configured tint once, directly in the model's render pass.
+        local color = SupplyPack.Config.BoxColor
+        model:SetColor(WORLD_MODEL_BASE_COLOR)
         model:SetModelScale(self.WorldModelScale, 0)
         local pos, ang = self:GetCrateWorldModelTransform()
         model:SetPos(pos)
         model:SetAngles(ang)
         model:SetupBones()
+        -- Do not inherit a red modulation left by a viewmodel render pass.
+        local r, g, b = render.GetColorModulation()
+        render.SetColorModulation(color.r / 255, color.g / 255, color.b / 255)
         model:DrawModel(flags)
+        SupplyPack.DrawMedicalSymbol(model)
+        render.SetColorModulation(r, g, b)
     end
 
     function SWEP:OnRemove()
@@ -156,7 +203,7 @@ if CLIENT then
         render.SetColorModulation(color.r / 255, color.g / 255, color.b / 255)
     end
 
-    function SWEP:PostDrawViewModel()
+    function SWEP:PostDrawViewModel(vm)
         local previous = self.SupplyPackPreviousColorModulation
         if previous then
             render.SetColorModulation(previous[1], previous[2], previous[3])
@@ -165,6 +212,9 @@ if CLIENT then
     end
 
     function SWEP:ViewModelDrawn(vm)
+        if self.SupplyPackPreviousViewModelScale ~= nil then
+            SupplyPack.DrawViewModelMedicalSymbol(vm)
+        end
         -- The player shares this viewmodel entity with other weapons.
         vm:SetModelScale(self.SupplyPackPreviousViewModelScale or 1, 0)
         vm:SetColor(self.SupplyPackPreviousViewModelColor or Color(255, 255, 255))
@@ -188,6 +238,7 @@ function SWEP:PrimaryAttack()
 
     self:SetNextPrimaryFire(now + cfg.ThrowCooldown)
     self:SetNextSecondaryFire(now + cfg.ThrowCooldown)
+    self:UpdateSupplyPackHoldType()
     self:SendWeaponAnim(ACT_VM_THROW)
     owner:SetAnimation(PLAYER_ATTACK1)
     self:EmitSound("WeaponFrag.Throw", 70, 100, 0.8)
